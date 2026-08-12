@@ -88,12 +88,7 @@ services:
   tailscale:
     image: tailscale/tailscale:latest
     hostname: laser-editor
-    entrypoint: ["/bin/sh", "-c", "adduser -D -u 1000 app 2>/dev/null; exec /usr/local/bin/containerboot"]
-    environment:
-      - TS_STATE_DIR=/var/lib/tailscale
-      - TS_USERSPACE=true
-      - TS_SOCKET=/var/run/tailscale/tailscaled.sock
-      - TS_EXTRA_ARGS=--operator=app
+    entrypoint: ["/bin/sh", "-c", "adduser -D -u 1000 app 2>/dev/null; tailscaled --state=/var/lib/tailscale/tailscaled.state --statedir=/var/lib/tailscale --socket=/var/run/tailscale/tailscaled.sock --tun=userspace-networking & TPID=$$!; i=0; while [ ! -S /var/run/tailscale/tailscaled.sock ] && [ $$i -lt 30 ]; do sleep 1; i=$$((i+1)); done; tailscale --socket=/var/run/tailscale/tailscaled.sock set --operator=app || echo 'WARN: operator set failed'; trap 'kill $$TPID' TERM INT; wait $$TPID"]
     volumes:
       - ./tailscale-state:/var/lib/tailscale
       - tailscale-socket:/var/run/tailscale
