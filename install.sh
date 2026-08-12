@@ -88,10 +88,12 @@ services:
   tailscale:
     image: tailscale/tailscale:latest
     hostname: laser-editor
+    entrypoint: ["/bin/sh", "-c", "adduser -D -u 1000 app 2>/dev/null; exec /usr/local/bin/containerboot"]
     environment:
       - TS_STATE_DIR=/var/lib/tailscale
       - TS_USERSPACE=true
       - TS_SOCKET=/var/run/tailscale/tailscaled.sock
+      - TS_EXTRA_ARGS=--operator=app
     volumes:
       - ./tailscale-state:/var/lib/tailscale
       - tailscale-socket:/var/run/tailscale
