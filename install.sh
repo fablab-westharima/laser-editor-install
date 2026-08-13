@@ -95,6 +95,13 @@ EOF
     fi
 }
 
+write_token_file() {  # $1 = install dir — Finder で見える閲覧用コピー(.env が正)。
+    # ドットファイルは Finder に表示されず、非技術スタッフが確実に詰まる
+    # (2026-08-13 手順書ウォークスルーで確定)
+    TOKEN_VAL="$(grep '^LASER_ADMIN_TOKEN=' "$1/.env" | cut -d= -f2-)"
+    printf '%s\n' "$TOKEN_VAL" > "$1/管理トークン.txt"
+}
+
 pull_and_up() {  # $1 = install dir
     cd "$1"
     say "イメージを取得します: $IMAGE (公開イメージ・ログイン不要)"
@@ -156,6 +163,7 @@ macos_install() {
     mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/tailscale-state"
     write_compose "$INSTALL_DIR"
     write_env_if_missing "$INSTALL_DIR" 4
+    write_token_file "$INSTALL_DIR"
     # 電源操作ヘルパーは導入しない(PC の停止 = Docker Desktop の終了。
     # 管理画面もその案内を表示する — docker.sock 共有は権限過大のため非採用)
 
@@ -170,7 +178,7 @@ macos_install() {
  ✅ LaserEditor が起動しました(ブラウザを開きました)
 
    アプリ:       http://localhost:$APP_PORT
-   管理トークン: $INSTALL_DIR/.env の LASER_ADMIN_TOKEN
+   管理トークン: $INSTALL_DIR の「管理トークン.txt」
    データ実体:   $INSTALL_DIR  (バックアップはこのフォルダごとコピー)
 
    停止:         Docker Desktop を終了(メニューバーのクジラ → Quit)
@@ -248,6 +256,7 @@ linux_install() {
     mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/tailscale-state"
     write_compose "$INSTALL_DIR"
     write_env_if_missing "$INSTALL_DIR" "$WORKERS_DEFAULT"
+    write_token_file "$INSTALL_DIR"
     # 既存 .env への追導入も冪等に(wave 2: 管理画面サーバー操作の有効化フラグ)
     grep -q '^LASER_POWER_HELPER=' "$INSTALL_DIR/.env" \
         || echo "LASER_POWER_HELPER=1" >> "$INSTALL_DIR/.env"
