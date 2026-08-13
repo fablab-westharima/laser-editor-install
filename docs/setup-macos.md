@@ -32,8 +32,7 @@ curl -fsSL https://raw.githubusercontent.com/fablab-westharima/laser-editor-inst
 
 参加者がスマホでアクセスできる固定 URL と QR コードを作ります。
 
-1. `http://localhost:8000/admin-fablab-westharima` を開く → 管理トークンを入力
-   (トークンは **`ホーム → laser-editor → 管理トークン.txt`** に書いてあります。入力画面にも場所の案内が出ます)
+1. `http://localhost:8000/admin-fablab-westharima` を開く → **[トークンファイルを選択]** を押して、**`ホーム → laser-editor → 管理トークン.txt`** を選ぶだけでログインできます(コピペ不要。スマホから管理する場合は「直接入力」でトークンを貼り付け)
 2. **設定タブ → 「公開設定(インターネット公開)」→ [公開を開始]**
 3. **🔗「Tailscale にログインする」リンク**が出るのでクリック → Tailscale にログイン(Google 等で OK)→ 承認
    ※初回のみ、Funnel(公開機能)の有効化ボタンが出ることがあります — 押すだけです
@@ -51,7 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/fablab-westharima/laser-editor-inst
 
 ## 4. 困ったとき
 
-- **画面が真っ白/ボタンが出ない/トークンを間違えた**: 画面右上の **[トークン再設定]** を押すと入力からやり直せます(トークンは `laser-editor` フォルダの『管理トークン.txt』)。サーバーを入れ直した時も、古いトークンを検知して自動で聞き直します
+- **画面が真っ白/ボタンが出ない/トークンを間違えた**: 画面右上の **[トークン再設定]** を押すと、ファイル選択からやり直せます。サーバーを入れ直した時も、古いトークンを検知して自動で選び直し画面になります
 - **公開 URL の名前に「-1」が付いた**: 以前のサーバーの登録が Tailscale に残っています。[管理コンソールの機材一覧](https://login.tailscale.com/admin/machines) で古い `laser-editor` を Remove すると、次回から元の名前に戻せます
 - **半年後につながらなくなった**: Tailscale の鍵の有効期限(約 180 日)です。管理画面で [公開を開始] → ログインリンクをもう一度踏めば復活します。常設するラボは [機材一覧](https://login.tailscale.com/admin/machines) で該当ノードの **Disable key expiry** を設定しておくと切れなくなります
 - **わからなくなったら**: ターミナルで 1-2 の同じ 1 行(修復を兼ねます)
