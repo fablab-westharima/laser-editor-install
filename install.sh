@@ -100,6 +100,8 @@ services:
     image: ghcr.io/fablab-westharima/laser-editor:${LASER_IMAGE_TAG:-latest}
     network_mode: service:tailscale
     env_file: .env
+    environment:
+      - TZ=${TZ:-Asia/Tokyo}
     volumes:
       - ./data:/app/data
       - tailscale-socket:/var/run/tailscale
