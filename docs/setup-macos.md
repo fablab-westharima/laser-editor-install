@@ -32,7 +32,7 @@ curl -fsSL https://raw.githubusercontent.com/fablab-westharima/laser-editor-inst
 
 参加者がスマホでアクセスできる固定 URL と QR コードを作ります。
 
-1. `http://localhost:8000/admin-fablab-westharima` を開く → **[トークンファイルを選択]** を押して、**`ホーム → laser-editor → 管理トークン.txt`** を選ぶだけでログインできます(コピペ不要。スマホから管理する場合は「直接入力」でトークンを貼り付け)
+1. `http://localhost:8000/admin-fablab-westharima` を開く → **[トークンファイルを選択]** を押して、**`ホーム → laser-editor → 管理トークン.txt`** を選ぶだけでログインできます(コピペ不要。ファイル選択画面で **⌘⇧H** を押すとホームフォルダに一発で移動できます。スマホから管理する場合は「直接入力」でトークンを貼り付け)
 2. **設定タブ → 「公開設定(インターネット公開)」→ [公開を開始]**
 3. **🔗「Tailscale にログインする」リンク**が出るのでクリック → Tailscale にログイン(Google 等で OK)→ 承認
    ※初回のみ、Funnel(公開機能)の有効化ボタンが出ることがあります — 押すだけです
