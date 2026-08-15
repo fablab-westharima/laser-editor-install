@@ -5,6 +5,10 @@
 #     curl -fsSL https://raw.githubusercontent.com/fablab-westharima/laser-editor-install/main/install.sh | sudo bash
 #   macOS (Docker Desktop):
 #     curl -fsSL https://raw.githubusercontent.com/fablab-westharima/laser-editor-install/main/install.sh | bash
+#   Windows: このスクリプトではなく install.bat をダブルクリックしてください
+#
+# アンインストールは uninstall.sh（Windows は uninstall.bat）。何が消えて何が残るかは
+# prompt/maintenance/local/docs/install-footprint.md に一覧があります。
 #
 # Idempotent: re-running repairs/updates the install (pulls the newest image,
 # rewrites compose.yaml, keeps your .env and data). If anything fails, fix the
@@ -42,13 +46,19 @@ services:
     restart: unless-stopped
 
   app:
-    image: ghcr.io/fablab-westharima/laser-editor:${LASER_IMAGE_TAG:-latest}
+    # Formal releases pin by digest; the tag rides along so a human can read the
+    # version. The engine resolves the digest when both are present, so
+    # LASER_IMAGE_DIGEST decides the bytes (B3-a). Empty = previous behaviour.
+    image: ghcr.io/fablab-westharima/laser-editor:${LASER_IMAGE_TAG:-latest}${LASER_IMAGE_DIGEST:+@${LASER_IMAGE_DIGEST}}
     network_mode: service:tailscale
     env_file: .env
     environment:
       - TZ=${TZ:-Asia/Tokyo}
+      - LASER_EXTERNAL_INBOX=${LASER_EXTERNAL_INBOX_HOST:+/scan-inbox}
     volumes:
       - ./data:/app/data
+      - ${LASER_EXTERNAL_INBOX_HOST:-./scan-inbox}:/scan-inbox
+      - laser-ai-work:/app/data/ai_work
       - tailscale-socket:/var/run/tailscale
     depends_on:
       - tailscale
@@ -77,6 +87,7 @@ services:
 
 volumes:
   tailscale-socket:
+  laser-ai-work:
 EMBEDDED_COMPOSE
 }
 
@@ -89,6 +100,13 @@ write_env_if_missing() {  # $1 = install dir, $2 = workers default
 LASER_ADMIN_TOKEN=$TOKEN
 LASER_WORKERS=$2
 LASER_IMAGE_TAG=latest
+# 正式リリースを固定する場合は、版名(v1.0.0 等)を上の TAG に、その版の digest を
+# 下に書きます。digest を書いた側が実体を決め、tag は人が読むための名前になります。
+# 版と digest の対は \`scripts/release.py verify\` が出力します。
+#LASER_IMAGE_DIGEST=sha256:...
+# ScanSnap Home の保存先フォルダ(この機械の実パス)。設定すると自動取込が動きます。
+# 空白を含むパスもそのまま書けます（クォート不要）。未設定なら自動取込は休止。
+#LASER_EXTERNAL_INBOX_HOST=/Users/you/Documents/ScanSnap Home folder
 EOF
         chmod 600 "$1/.env"
         say ".env を生成しました(管理トークン自動生成済み)"
@@ -343,5 +361,7 @@ EOF
 case "$(uname -s)" in
     Darwin) macos_install "$@" ;;
     Linux)  linux_install "$@" ;;
-    *)      fail "未対応 OS です(検出: $(uname -s))。Linux または macOS で実行してください" ;;
+    MINGW*|MSYS*|CYGWIN*)
+        fail "Windows では install.bat をダブルクリックしてください(このスクリプトは macOS / Linux 用です)" ;;
+    *)      fail "未対応 OS です(検出: $(uname -s))。macOS / Linux はこのスクリプト、Windows は install.bat を使ってください" ;;
 esac
