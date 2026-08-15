@@ -119,7 +119,7 @@ Docker Desktop がインストールされていません。
 
     1. Docker Desktop を起動する
     2. 画面の案内に従って初回セットアップを完了する
-    3. タスクバー右下のクジラのアイコンが動きを止めて安定するまで待つ
+    3. タスクバー右下のクジラのアイコンが動きを止め、Docker Desktop が「Engine running」になるまで待つ
        （隠れている場合は「^」を押すと出てきます）
 
   を済ませたうえで、install.bat をもう一度ダブルクリックしてください。
@@ -131,7 +131,7 @@ if (-not $dockerCmd) {
 Docker Desktop はインストールされていますが、まだ使える状態になっていません。
 
   Docker Desktop を開き、画面の案内に従って初回セットアップを完了してください。
-  クジラのアイコンが動きを止めて安定したことを確認してから、
+  Docker Desktop が「Engine running」になったことを確認してから、
   install.bat をもう一度ダブルクリックしてください。
 
   ※ Docker Desktop を入れ直す必要はありません。入れ直しても直りませんし、
@@ -147,7 +147,7 @@ if (-not $engineOk) {
     NeedPrereq @"
 Docker Desktop は入っていますが、エンジンが動いていません。
 
-  Docker Desktop を起動し、クジラのアイコンが動きを止めて安定してから、
+  Docker Desktop を起動し、「Engine running」になってから、
   install.bat をもう一度ダブルクリックしてください。
 
   何度やっても起動しない場合、原因の多くは BIOS の仮想化設定です。
