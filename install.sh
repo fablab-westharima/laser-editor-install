@@ -28,6 +28,12 @@ say()  { printf '\n\033[1;32m[laser-editor]\033[0m %s\n' "$*"; }
 warn() { printf '\n\033[1;33m[laser-editor WARN]\033[0m %s\n' "$*"; }
 fail() { printf '\n\033[1;31m[laser-editor ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
 
+# 前提ソフトが整っていないのは LaserEditor の失敗ではないので、終了コードを分ける。
+# 3 = 前提が未整備（ユーザーが Docker Desktop 側で作業してから再実行する）
+# 1 = LaserEditor 自身のインストールが失敗した
+# acceptance 側がこの 2 つを取り違えないために必要（前提不足を製品欠陥と数えない）。
+need_prereq() { printf '\n\033[1;33m[laser-editor 準備が必要]\033[0m %s\n' "$*" >&2; exit 3; }
+
 # NOTE: mirror of the repo's compose.yaml — keep the two in sync (see header).
 write_compose() {  # $1 = install dir
     cat > "$1/compose.yaml" <<'EMBEDDED_COMPOSE'
@@ -194,48 +200,50 @@ macos_install() {
     esac
 
     # ------------------------------------------------------ Docker Desktop
-    # 3 つの状態を分けて扱う。以前はこれらを 1 つにまとめていたため、初回設定が
-    # 済んでいない機械で「起動を確認できませんでした」とだけ出て、何度やり直しても
-    # 同じところで止まった(2026-08-16 MBP 実機)。
-    #   ① アプリが無い          → 導入を案内して終了(こちらでは入れない)
-    #   ② アプリはあるが CLI 未解決 → 初回設定が未完了。起動して待ち、解決を再試行
-    #   ③ CLI は解決、エンジン未起動 → 起動して待つ
+    # ---- preflight: Docker Desktop は外部の前提ソフトである -----------------
+    # LaserEditor は Docker Desktop のインストーラではない。導入も初回設定も代行せず、
+    # 状態を正しく見分けて、何をすればよいかを伝えて止まる。ここを通過するまで
+    # LaserEditor の痕跡は 1 つも作らない(下の mkdir 以降が最初の書き込み)。
+    #
+    #   A 未導入            → 案内して終了
+    #   B 導入済みだが未完了 → 何が足りないかを言って終了(こちらでは直さない)
+    #   C 使える状態        → ここで初めてインストールへ進む
     if docker_desktop_missing; then
-        say "Docker Desktop が見つかりません。ダウンロードページを開きます"
         open "https://www.docker.com/products/docker-desktop/" 2>/dev/null || true
-        fail "Docker Desktop をインストールして一度起動したあと、同じ 1 行をもう一度実行してください"
+        need_prereq "Docker Desktop がインストールされていません。
+
+   LaserEditor を動かすには Docker Desktop が必要です。
+   ダウンロードページを開きました。インストールしてから、
+
+     1. Docker Desktop を起動する
+     2. 画面の案内に従って初回セットアップを完了する
+     3. クジラのアイコンが「Engine running」になるまで待つ
+
+   を済ませたうえで、このインストーラをもう一度実行してください。"
     fi
 
+    # 正しく準備された Docker を「この process から確実に見つける」ための探索。
+    # 初回セットアップを肩代わりする仕組みではないので、見つからなければ待たずに止まる。
     if ! resolve_docker_cli; then
-        say "Docker Desktop の初回設定がまだ終わっていないようです。起動します"
-        open -a Docker 2>/dev/null || true
-        CLI_OK=0
-        # 初回設定を終えた時点で Docker Desktop が symlink を張るので、待ちながら
-        # 毎回いちから解決し直す。1 回目の結果を握って待ち続けても状況は変わらない
-        for _ in $(seq 1 40); do
-            if resolve_docker_cli; then CLI_OK=1; break; fi
-            sleep 3
-        done
-        if [ "$CLI_OK" -ne 1 ]; then
-            fail "Docker Desktop の初回設定を完了してください。
-   画面の案内(「Use recommended settings」→「Finish」)を最後まで進め、
-   管理者パスワードの入力があればそれも済ませてください。
-   クジラのアイコンが「Engine running」で安定したら、同じ 1 行をもう一度実行してください。
+        need_prereq "Docker Desktop はインストールされていますが、まだ使える状態になっていません。
 
-   ※ 途中で止まったからといって Docker Desktop を入れ直さないでください。
-     入れ直しても直りませんし、かえって復旧が難しくなります。"
-        fi
+   Docker Desktop を開き、画面の案内に従って初回セットアップを完了してください
+   (「Use recommended settings」→「Finish」。管理者パスワードを求められたら入力します)。
+
+   クジラのアイコンが「Engine running」になったことを確認してから、
+   このインストーラをもう一度実行してください。
+
+   ※ Docker Desktop を入れ直す必要はありません。入れ直しても直りませんし、
+     かえって復旧が難しくなります。"
     fi
 
     if ! docker info >/dev/null 2>&1; then
-        say "Docker エンジンの起動を待ちます(初回は 1 分ほどかかります)"
-        open -a Docker 2>/dev/null || true
-        DOCKER_OK=0
-        for _ in $(seq 1 30); do
-            if docker info >/dev/null 2>&1; then DOCKER_OK=1; break; fi
-            sleep 3
-        done
-        [ "$DOCKER_OK" -eq 1 ] || fail "Docker エンジンの起動を確認できませんでした。クジラのアイコンが「Engine running」で安定したら、同じ 1 行をもう一度実行してください"
+        need_prereq "Docker Desktop は入っていますが、エンジンが動いていません。
+
+   Docker Desktop を起動し、クジラのアイコンが「Engine running」で
+   安定するまで待ってから、このインストーラをもう一度実行してください。
+
+   ※ 入れ直す必要はありません。"
     fi
     say "Docker: 稼働中 ($(docker --version))"
 

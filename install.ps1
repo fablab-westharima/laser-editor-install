@@ -30,6 +30,15 @@ function Fail {
     exit 1
 }
 
+# 前提ソフトが整っていないのは LaserEditor の失敗ではないので、終了コードを分ける。
+# 3 = 前提が未整備（Docker Desktop 側で作業してから再実行）/ 1 = 本体のインストール失敗。
+# acceptance 側がこの 2 つを取り違えないために必要。
+function NeedPrereq {
+    param($m)
+    Write-Host "`n[laser-editor 準備が必要] $m" -ForegroundColor Yellow
+    exit 3
+}
+
 # 秘密情報を書き込む先は UTF-8(BOM なし)。Windows PowerShell の Out-File は BOM を
 # 付けるため、compose と .env が読めなくなる。ここは必ず .NET 側で書く。
 function Write-Utf8NoBom {
@@ -93,19 +102,40 @@ else { Warn '仮想化の状態を自動判定できませんでした。先へ�
 # ================================================ Docker Desktop の確認 =====
 # 本体は導入しません。無ければダウンロードページを開いて、いったん終了します。
 
+# Docker Desktop は外部の前提ソフト。LaserEditor は導入も初回設定も代行せず、
+# 状態を見分けて、何をすればよいかを伝えて止まる。ここを通過するまで LaserEditor の
+# 痕跡は 1 つも作らない。
 $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
 $dockerApp = Test-Path (Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe')
+
 if (-not $dockerCmd -and -not $dockerApp) {
     Say 'Docker Desktop が見つかりません。ダウンロードページを開きます'
     Start-Process 'https://www.docker.com/products/docker-desktop/'
-    Fail @"
-Docker Desktop を「公式のインストーラ（Docker Desktop Installer.exe）」で
-インストールし、一度起動してください。
+    NeedPrereq @"
+Docker Desktop がインストールされていません。
 
-  タスクバー右下のクジラのアイコンが動きを止めて安定したら準備完了です
-  （隠れている場合は「^」を押すと出てきます）。
+  LaserEditor を動かすには Docker Desktop が必要です。
+  「公式のインストーラ（Docker Desktop Installer.exe）」でインストールしてから、
 
-  そのあと install.bat をもう一度ダブルクリックしてください。
+    1. Docker Desktop を起動する
+    2. 画面の案内に従って初回セットアップを完了する
+    3. タスクバー右下のクジラのアイコンが動きを止めて安定するまで待つ
+       （隠れている場合は「^」を押すと出てきます）
+
+  を済ませたうえで、install.bat をもう一度ダブルクリックしてください。
+"@
+}
+
+if (-not $dockerCmd) {
+    NeedPrereq @"
+Docker Desktop はインストールされていますが、まだ使える状態になっていません。
+
+  Docker Desktop を開き、画面の案内に従って初回セットアップを完了してください。
+  クジラのアイコンが動きを止めて安定したことを確認してから、
+  install.bat をもう一度ダブルクリックしてください。
+
+  ※ Docker Desktop を入れ直す必要はありません。入れ直しても直りませんし、
+    かえって復旧が難しくなります。
 "@
 }
 
@@ -114,20 +144,11 @@ Say 'Docker エンジンの状態を確認しています'
 $engineOk = $false
 try { docker info *> $null; if ($LASTEXITCODE -eq 0) { $engineOk = $true } } catch { }
 if (-not $engineOk) {
-    Say 'Docker Desktop を起動します（初回は 1〜2 分かかります）'
-    $exe = Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'
-    if (Test-Path $exe) { Start-Process $exe | Out-Null }
-    for ($i = 0; $i -lt 40; $i++) {
-        Start-Sleep -Seconds 3
-        try { docker info *> $null; if ($LASTEXITCODE -eq 0) { $engineOk = $true; break } } catch { }
-    }
-}
-if (-not $engineOk) {
-    Fail @"
-Docker エンジンの起動を確認できませんでした。
+    NeedPrereq @"
+Docker Desktop は入っていますが、エンジンが動いていません。
 
-  クジラのアイコンが動き続けている場合は、まだ起動の途中です。
-  アイコンが止まって安定してから install.bat をもう一度実行してください。
+  Docker Desktop を起動し、クジラのアイコンが動きを止めて安定してから、
+  install.bat をもう一度ダブルクリックしてください。
 
   何度やっても起動しない場合、原因の多くは BIOS の仮想化設定です。
   入れ直しでは直らないので、繰り返さずにご連絡ください。
