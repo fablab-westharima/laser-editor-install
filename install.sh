@@ -42,7 +42,7 @@ name: laser-editor
 services:
   tailscale:
     image: tailscale/tailscale:latest
-    hostname: laser-editor
+    hostname: ${LASER_TS_HOSTNAME:-laser-editor}
     entrypoint: ["/bin/sh", "-c", "adduser -D -u 1000 app 2>/dev/null; tailscaled --state=/var/lib/tailscale/tailscaled.state --statedir=/var/lib/tailscale --socket=/var/run/tailscale/tailscaled.sock --tun=userspace-networking & TPID=$$!; i=0; while [ ! -S /var/run/tailscale/tailscaled.sock ] && [ $$i -lt 30 ]; do sleep 1; i=$$((i+1)); done; tailscale --socket=/var/run/tailscale/tailscaled.sock set --operator=app || echo 'WARN: operator set failed'; trap 'kill $$TPID' TERM INT; wait $$TPID"]
     volumes:
       - ./tailscale-state:/var/lib/tailscale
@@ -102,6 +102,11 @@ write_env_if_missing() {  # $1 = install dir, $2 = workers default
         say ".env: 既存を維持(トークン・設定は変更しません)"
     else
         TOKEN="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+        # この機械の tailnet 上の名前 = 公開 URL。全インストールが同じ名前を名乗ると
+        # 2 台目が同じ公開 identity を主張する(2026-08-16 実測)。生成は初回だけで、
+        # 以後は .env の値が正 — 再インストールでも変わらない(この関数自体が
+        # 「.env があれば何もしない」ため)。
+        TS_HOSTNAME="laser-editor-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
         cat > "$1/.env" <<EOF
 LASER_ADMIN_TOKEN=$TOKEN
 LASER_WORKERS=$2
@@ -110,6 +115,11 @@ LASER_IMAGE_TAG=latest
 # 下に書きます。digest を書いた側が実体を決め、tag は人が読むための名前になります。
 # 版と digest の対は \`scripts/release.py verify\` が出力します。
 #LASER_IMAGE_DIGEST=sha256:...
+# この機械の名前です。インターネット公開を使うと、公開 URL は
+# https://<この名前>.<あなたの tailnet>.ts.net になります。
+# **書き換えると公開 URL が変わり、配布済みの QR は届かなくなります。**
+# 2 台目を導入するときは、この行が機械ごとに違うことを確かめてください。
+LASER_TS_HOSTNAME=$TS_HOSTNAME
 # ScanSnap Home の保存先フォルダ(この機械の実パス)。設定すると自動取込が動きます。
 # 空白を含むパスもそのまま書けます（クォート不要）。未設定なら自動取込は休止。
 #LASER_EXTERNAL_INBOX_HOST=/Users/you/Documents/ScanSnap Home folder

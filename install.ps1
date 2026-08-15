@@ -169,7 +169,7 @@ name: laser-editor
 services:
   tailscale:
     image: tailscale/tailscale:latest
-    hostname: laser-editor
+    hostname: ${LASER_TS_HOSTNAME:-laser-editor}
     entrypoint: ["/bin/sh", "-c", "adduser -D -u 1000 app 2>/dev/null; tailscaled --state=/var/lib/tailscale/tailscaled.state --statedir=/var/lib/tailscale --socket=/var/run/tailscale/tailscaled.sock --tun=userspace-networking & TPID=$$!; i=0; while [ ! -S /var/run/tailscale/tailscaled.sock ] && [ $$i -lt 30 ]; do sleep 1; i=$$((i+1)); done; tailscale --socket=/var/run/tailscale/tailscaled.sock set --operator=app || echo 'WARN: operator set failed'; trap 'kill $$TPID' TERM INT; wait $$TPID"]
     volumes:
       - ./tailscale-state:/var/lib/tailscale
@@ -232,6 +232,12 @@ if (Test-Path $envPath) {
     $bytes = New-Object byte[] 24
     [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
     $token = -join ($bytes | ForEach-Object { $_.ToString('x2') })
+    # この PC の tailnet 上の名前 = 公開 URL。全インストールが同じ名前を名乗ると
+    # 2 台目が同じ公開 identity を主張する（2026-08-16 実測）。生成は初回だけで、
+    # 以後は .env の値が正 — 再インストールでも変わらない（この分岐に入らない）。
+    $hostBytes = New-Object byte[] 4
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($hostBytes)
+    $tsHostname = 'laser-editor-' + (-join ($hostBytes | ForEach-Object { $_.ToString('x2') }))
     # トークンは画面にもログにも出さない。ファイルにだけ書く。
     $envText = @"
 LASER_ADMIN_TOKEN=$token
@@ -240,6 +246,11 @@ LASER_IMAGE_TAG=latest
 # 正式リリースを固定する場合は、版名(v1.0.0 等)を上の TAG に、その版の digest を
 # 下に書きます。digest を書いた側が実体を決め、tag は人が読むための名前になります。
 #LASER_IMAGE_DIGEST=sha256:...
+# この PC の名前です。インターネット公開を使うと、公開 URL は
+# https://<この名前>.<あなたの tailnet>.ts.net になります。
+# **書き換えると公開 URL が変わり、配布済みの QR は届かなくなります。**
+# 2 台目を導入するときは、この行が機械ごとに違うことを確かめてください。
+LASER_TS_HOSTNAME=$tsHostname
 # ScanSnap Home の保存先フォルダ(この PC の実パス)。設定すると自動取込が動きます。
 # **区切りは / で書いてください**（\ ではありません）。空白を含むパスもそのままで可。
 #LASER_EXTERNAL_INBOX_HOST=C:/Users/you/Documents/ScanSnap Home folder
