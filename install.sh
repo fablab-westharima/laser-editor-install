@@ -131,6 +131,41 @@ pull_and_up() {  # $1 = install dir
     docker compose up -d
 }
 
+# Docker Desktop の CLI は **アプリバンドルの中**にあり、`/usr/local/bin/docker` は
+# Docker Desktop 自身が初回設定のときに(管理者権限で)張る symlink である。
+# つまり「Docker.app はインストールしたが、初回設定をまだ終えていない」機械には
+#   /Applications/Docker.app         … ある
+#   docker コマンド                  … PATH に無い
+# という状態が実在する(2026-08-16 実測: MBP M3 Pro / macOS 26.6)。
+# ここで PATH を直さないと、`docker info` は「エンジンが起動していない」ではなく
+# 「コマンドが無い」で失敗し続け、何秒待っても状況は変わらない。
+#
+# この関数は **この process の PATH だけ**を直す。ユーザーのシェル設定には触らないし、
+# symlink も作らない — それは Docker Desktop の仕事で、管理者権限を要する(拘束 1)。
+resolve_docker_cli() {
+    command -v docker >/dev/null 2>&1 && return 0
+    _d=""
+    for _d in "${DOCKER_APP_DIR:-/Applications/Docker.app}/Contents/Resources/bin" \
+              "$HOME/.docker/bin"; do
+        # 「ファイルがある」で採用しない。実際に起動できることまで確かめる —
+        # 壊れた残骸や別アーキテクチャのバイナリを掴むと、この先の失敗の原因が
+        # 分からなくなる
+        if [ -x "$_d/docker" ] && "$_d/docker" --version >/dev/null 2>&1; then
+            PATH="$_d:$PATH"
+            export PATH
+            return 0
+        fi
+    done
+    return 1
+}
+
+# 「Docker Desktop が入っていない」と「入っているが CLI がまだ解決できない」は
+# 別の状態で、案内すべき内容も違う。1 つにまとめていたせいで、Docker.app が入って
+# いる機械に「Docker Desktop をインストールしてください」と出していた。
+docker_desktop_missing() {
+    [ ! -d "${DOCKER_APP_DIR:-/Applications/Docker.app}" ] && ! command -v docker >/dev/null 2>&1
+}
+
 health_wait() {
     say "ヘルスチェック中 (最大 90 秒)"
     HEALTH_OK=0
@@ -159,20 +194,48 @@ macos_install() {
     esac
 
     # ------------------------------------------------------ Docker Desktop
-    if ! command -v docker >/dev/null 2>&1 && [ ! -d "/Applications/Docker.app" ]; then
+    # 3 つの状態を分けて扱う。以前はこれらを 1 つにまとめていたため、初回設定が
+    # 済んでいない機械で「起動を確認できませんでした」とだけ出て、何度やり直しても
+    # 同じところで止まった(2026-08-16 MBP 実機)。
+    #   ① アプリが無い          → 導入を案内して終了(こちらでは入れない)
+    #   ② アプリはあるが CLI 未解決 → 初回設定が未完了。起動して待ち、解決を再試行
+    #   ③ CLI は解決、エンジン未起動 → 起動して待つ
+    if docker_desktop_missing; then
         say "Docker Desktop が見つかりません。ダウンロードページを開きます"
         open "https://www.docker.com/products/docker-desktop/" 2>/dev/null || true
         fail "Docker Desktop をインストールして一度起動したあと、同じ 1 行をもう一度実行してください"
     fi
+
+    if ! resolve_docker_cli; then
+        say "Docker Desktop の初回設定がまだ終わっていないようです。起動します"
+        open -a Docker 2>/dev/null || true
+        CLI_OK=0
+        # 初回設定を終えた時点で Docker Desktop が symlink を張るので、待ちながら
+        # 毎回いちから解決し直す。1 回目の結果を握って待ち続けても状況は変わらない
+        for _ in $(seq 1 40); do
+            if resolve_docker_cli; then CLI_OK=1; break; fi
+            sleep 3
+        done
+        if [ "$CLI_OK" -ne 1 ]; then
+            fail "Docker Desktop の初回設定を完了してください。
+   画面の案内(「Use recommended settings」→「Finish」)を最後まで進め、
+   管理者パスワードの入力があればそれも済ませてください。
+   クジラのアイコンが「Engine running」で安定したら、同じ 1 行をもう一度実行してください。
+
+   ※ 途中で止まったからといって Docker Desktop を入れ直さないでください。
+     入れ直しても直りませんし、かえって復旧が難しくなります。"
+        fi
+    fi
+
     if ! docker info >/dev/null 2>&1; then
-        say "Docker Desktop を起動します(初回は起動完了まで 1 分ほどかかります)"
+        say "Docker エンジンの起動を待ちます(初回は 1 分ほどかかります)"
         open -a Docker 2>/dev/null || true
         DOCKER_OK=0
         for _ in $(seq 1 30); do
             if docker info >/dev/null 2>&1; then DOCKER_OK=1; break; fi
             sleep 3
         done
-        [ "$DOCKER_OK" -eq 1 ] || fail "Docker Desktop の起動を確認できませんでした。クジラのアイコンが安定したら、同じ 1 行をもう一度実行してください"
+        [ "$DOCKER_OK" -eq 1 ] || fail "Docker エンジンの起動を確認できませんでした。クジラのアイコンが「Engine running」で安定したら、同じ 1 行をもう一度実行してください"
     fi
     say "Docker: 稼働中 ($(docker --version))"
 
@@ -358,6 +421,14 @@ EOF
 }
 
 # ============================================================== dispatch =====
+# LASER_INSTALL_LIB=1 で source すると、関数を定義するだけで何も実行しない。
+# テストが resolve_docker_cli を偽の Docker.app に対して直接叩けるようにするための
+# 縫い目 — インストーラの分岐を「読んで確かめる」のではなく実際に走らせて確かめる
+# ためにある(実機で 1 回踏んだ欠陥を、次からはテストで捕まえる)。
+if [ "${LASER_INSTALL_LIB:-0}" = "1" ]; then
+    return 0 2>/dev/null || exit 0
+fi
+
 case "$(uname -s)" in
     Darwin) macos_install "$@" ;;
     Linux)  linux_install "$@" ;;
