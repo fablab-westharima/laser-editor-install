@@ -3,6 +3,23 @@
 レーザー加工ワークショップ用デザイン Web アプリ **LaserEditor** の導入用リポジトリです。
 (アプリ本体のイメージは ghcr.io/fablab-westharima/laser-editor として公開されています)
 
+<!-- install.sh / install.ps1 / install.bat / uninstall.* / env.example は
+     LaserEditor 本体リポジトリから自動同期されています。ここで直接編集しても
+     次の同期で上書きされます。修正は本体側で行ってください。
+     由来 = .source-commit -->
+
+> **導入ファイルの場所**（正式な手順書は準備中です）
+>
+> | OS | インストール | アンインストール |
+> |---|---|---|
+> | Raspberry Pi / Linux | 下の 1 行(`install.sh`) | `uninstall.sh` |
+> | macOS | 下の 1 行(`install.sh`) | `uninstall.sh` |
+> | Windows 11 | `install.bat` をダブルクリック | `uninstall.bat` |
+>
+> ※ 下の「動作要件」は Raspberry Pi / Linux サーバー構成についての記述です。
+> macOS / Windows は手持ちの PC に Docker Desktop を入れて使う構成で、
+> 手順書は別途用意します。
+
 ## 動作要件
 
 - Raspberry Pi 4B/5(**4GB 以上推奨**・2GB 未満はワーカー数が自動で縮小されます)または x86_64 の Linux サーバー
