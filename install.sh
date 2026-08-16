@@ -107,14 +107,35 @@ write_env_if_missing() {  # $1 = install dir, $2 = workers default
         # 以後は .env の値が正 — 再インストールでも変わらない(この関数自体が
         # 「.env があれば何もしない」ため)。
         TS_HOSTNAME="laser-editor-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+        # 自動導入(acceptance / リリース検証)が、入れる版を入口から指定するための口。
+        # **新規の .env を作るときの初期値にしかならない** — 既存 .env はこの関数の
+        # 冒頭で早期 return するので、運用中の設定を環境変数が黙って上書きすることは
+        # ない。何も指定しなければ従来どおり latest。
+        IMAGE_TAG="${LASER_IMAGE_TAG:-latest}"
+        case "$IMAGE_TAG" in
+            *[!A-Za-z0-9._-]*|"") fail "LASER_IMAGE_TAG の形式が不正です: $IMAGE_TAG" ;;
+        esac
+        IMAGE_DIGEST="${LASER_IMAGE_DIGEST:-}"
+        if [ -n "$IMAGE_DIGEST" ]; then
+            case "$IMAGE_DIGEST" in
+                sha256:*) : ;;
+                *) fail "LASER_IMAGE_DIGEST の形式が不正です(sha256:<64桁の16進>)" ;;
+            esac
+            HEX="${IMAGE_DIGEST#sha256:}"
+            [ "${#HEX}" -eq 64 ] || fail "LASER_IMAGE_DIGEST の桁数が不正です(64桁の16進)"
+            case "$HEX" in *[!0-9a-f]*) fail "LASER_IMAGE_DIGEST に 16 進以外の文字があります" ;; esac
+            DIGEST_LINE="LASER_IMAGE_DIGEST=$IMAGE_DIGEST"
+        else
+            DIGEST_LINE="#LASER_IMAGE_DIGEST=sha256:..."
+        fi
         cat > "$1/.env" <<EOF
 LASER_ADMIN_TOKEN=$TOKEN
 LASER_WORKERS=$2
-LASER_IMAGE_TAG=latest
+LASER_IMAGE_TAG=$IMAGE_TAG
 # 正式リリースを固定する場合は、版名(v1.0.0 等)を上の TAG に、その版の digest を
 # 下に書きます。digest を書いた側が実体を決め、tag は人が読むための名前になります。
 # 版と digest の対は \`scripts/release.py verify\` が出力します。
-#LASER_IMAGE_DIGEST=sha256:...
+$DIGEST_LINE
 # この機械の名前です。インターネット公開を使うと、公開 URL は
 # https://<この名前>.<あなたの tailnet>.ts.net になります。
 # **書き換えると公開 URL が変わり、配布済みの QR は届かなくなります。**

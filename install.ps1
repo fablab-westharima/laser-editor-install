@@ -238,14 +238,27 @@ if (Test-Path $envPath) {
     $hostBytes = New-Object byte[] 4
     [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($hostBytes)
     $tsHostname = 'laser-editor-' + (-join ($hostBytes | ForEach-Object { $_.ToString('x2') }))
+    # 自動導入（acceptance / リリース検証）が、入れる版を入口から指定するための口。
+    # **新規の .env を作るときの初期値にしかならない** — 既存 .env はこの分岐に
+    # 入らないので、運用中の設定を環境変数が黙って上書きすることはない。
+    # 何も指定しなければ従来どおり latest。
+    $imageTag = if ($env:LASER_IMAGE_TAG) { $env:LASER_IMAGE_TAG } else { 'latest' }
+    if ($imageTag -notmatch '^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$') {
+        Fail "LASER_IMAGE_TAG の形式が不正です: $imageTag"
+    }
+    $imageDigest = $env:LASER_IMAGE_DIGEST
+    if ($imageDigest -and $imageDigest -notmatch '^sha256:[0-9a-f]{64}$') {
+        Fail "LASER_IMAGE_DIGEST の形式が不正です（sha256:<64桁の16進> の形で指定してください）"
+    }
+    $digestLine = if ($imageDigest) { "LASER_IMAGE_DIGEST=$imageDigest" } else { '#LASER_IMAGE_DIGEST=sha256:...' }
     # トークンは画面にもログにも出さない。ファイルにだけ書く。
     $envText = @"
 LASER_ADMIN_TOKEN=$token
 LASER_WORKERS=4
-LASER_IMAGE_TAG=latest
+LASER_IMAGE_TAG=$imageTag
 # 正式リリースを固定する場合は、版名(v1.0.0 等)を上の TAG に、その版の digest を
 # 下に書きます。digest を書いた側が実体を決め、tag は人が読むための名前になります。
-#LASER_IMAGE_DIGEST=sha256:...
+$digestLine
 # この PC の名前です。インターネット公開を使うと、公開 URL は
 # https://<この名前>.<あなたの tailnet>.ts.net になります。
 # **書き換えると公開 URL が変わり、配布済みの QR は届かなくなります。**
