@@ -1,4 +1,4 @@
-# LaserEditor uninstaller — Windows 11.
+﻿# LaserEditor uninstaller — Windows 11.
 #
 #   uninstall.bat をダブルクリックしてください。
 #   PowerShell から: powershell -ExecutionPolicy Bypass -File uninstall.ps1 [-DryRun] [-Purge]

@@ -1,4 +1,4 @@
-# LaserEditor installer — Windows 11 (Docker Desktop).
+﻿# LaserEditor installer — Windows 11 (Docker Desktop).
 #
 #   install.bat をダブルクリックしてください（これを直接実行する必要はありません）。
 #   PowerShell から直接: powershell -ExecutionPolicy Bypass -File install.ps1
