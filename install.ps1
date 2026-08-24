@@ -46,6 +46,129 @@ function Write-Utf8NoBom {
     [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding $false))
 }
 
+function Get-CanonicalDownloads {
+    $signature = @'
+using System;
+using System.Runtime.InteropServices;
+public static class LaserKnownFolders {
+    [DllImport("shell32.dll")]
+    public static extern int SHGetKnownFolderPath(
+        [MarshalAs(UnmanagedType.LPStruct)] Guid rfid,
+        uint dwFlags,
+        IntPtr hToken,
+        out IntPtr ppszPath);
+}
+'@
+    try {
+        if (-not ('LaserKnownFolders' -as [type])) {
+            Add-Type -TypeDefinition $signature
+        }
+        $ptr = [IntPtr]::Zero
+        $downloadsId = New-Object Guid '374DE290-123F-4565-9164-39C4925E467B'
+        $result = [LaserKnownFolders]::SHGetKnownFolderPath(
+            $downloadsId, 0, [IntPtr]::Zero, [ref]$ptr)
+        if ($result -eq 0 -and $ptr -ne [IntPtr]::Zero) {
+            try { return [Runtime.InteropServices.Marshal]::PtrToStringUni($ptr) }
+            finally { [Runtime.InteropServices.Marshal]::FreeCoTaskMem($ptr) }
+        }
+    } catch { }
+
+    try {
+        $shell = New-Object -ComObject Shell.Application
+        $folder = $shell.NameSpace('shell:Downloads')
+        if ($folder -and $folder.Self -and $folder.Self.Path) {
+            return $folder.Self.Path
+        }
+    } catch { }
+
+    $fallback = Join-Path $env:USERPROFILE 'Downloads'
+    Warn "標準のダウンロードフォルダを取得できなかったため、$fallback を使います"
+    return $fallback
+}
+
+function Normalize-InboxPath {
+    param([string]$Value)
+    if ($null -eq $Value) { return '' }
+    return (($Value.Trim() -replace '\\', '/').TrimEnd('/'))
+}
+
+function Set-ExternalInboxKey {
+    param([string]$Path, [string]$Key, [string]$Value)
+    $lines = [System.IO.File]::ReadAllLines($Path)
+    $out = New-Object System.Collections.Generic.List[string]
+    $replaced = $false
+    foreach ($line in $lines) {
+        if (-not $replaced -and $line.StartsWith($Key + '=')) {
+            $out.Add($Key + '=' + $Value)
+            $replaced = $true
+        } else {
+            $out.Add($line)
+        }
+    }
+    if (-not $replaced) { $out.Add($Key + '=' + $Value) }
+    Write-Utf8NoBom $Path (($out -join "`n") + "`n")
+}
+
+function Set-ExternalInboxEnv {
+    param([string]$Path, [string]$Value)
+    Set-ExternalInboxKey $Path 'LASER_EXTERNAL_INBOX_HOST' $Value
+}
+
+function Remove-ExternalInboxKey {
+    param([string]$Path, [string]$Key)
+    $lines = [System.IO.File]::ReadAllLines($Path)
+    $kept = @($lines | Where-Object { -not $_.StartsWith($Key + '=') })
+    if ($kept.Count -ne $lines.Count) {
+        Write-Utf8NoBom $Path (($kept -join "`n") + "`n")
+    }
+}
+
+function Update-ExternalInboxEnv {
+    param([string]$Path, [string]$StandardInbox, [string]$LegacyInbox)
+    $active = $null
+    foreach ($line in [System.IO.File]::ReadAllLines($Path)) {
+        if ($line.StartsWith('LASER_EXTERNAL_INBOX_HOST=')) {
+            $active = $line.Substring('LASER_EXTERNAL_INBOX_HOST='.Length)
+            break
+        }
+    }
+    $current = Normalize-InboxPath $active
+    $standard = Normalize-InboxPath $StandardInbox
+    $legacy = Normalize-InboxPath $LegacyInbox
+    $standardRoot = Normalize-InboxPath (Split-Path -Parent (Split-Path -Parent $StandardInbox))
+    if ([string]::IsNullOrWhiteSpace($current)) {
+        Set-ExternalInboxEnv $Path $standard
+        Set-ExternalInboxKey $Path 'LASER_EXTERNAL_INBOX_ROOT' $standardRoot
+        Remove-ExternalInboxKey $Path 'LASER_EXTERNAL_INBOX_MOUNT'
+        Say "標準の監視フォルダを設定しました: $standard"
+    } elseif ($current -eq $standard) {
+        Set-ExternalInboxKey $Path 'LASER_EXTERNAL_INBOX_ROOT' $standardRoot
+        Remove-ExternalInboxKey $Path 'LASER_EXTERNAL_INBOX_MOUNT'
+        return
+    } elseif ($current -eq $legacy) {
+        Set-ExternalInboxEnv $Path $standard
+        Set-ExternalInboxKey $Path 'LASER_EXTERNAL_INBOX_ROOT' $standardRoot
+        Remove-ExternalInboxKey $Path 'LASER_EXTERNAL_INBOX_MOUNT'
+        Say "監視フォルダを標準の場所へ更新しました: $standard"
+        $remaining = @(Get-ChildItem -LiteralPath $LegacyInbox -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -match '^\.(jpg|jpeg|png|webp)$' }).Count
+        if ($remaining -gt 0) {
+            Warn "以前の監視フォルダに画像が $remaining 件残っています: $LegacyInbox"
+            Warn '画像は移動・削除していません。必要に応じて内容を確認してください'
+        }
+    } else {
+        Remove-ExternalInboxKey $Path 'LASER_EXTERNAL_INBOX_ROOT'
+        Set-ExternalInboxKey $Path 'LASER_EXTERNAL_INBOX_MOUNT' $current
+        if ($active -match '\\') {
+            $normalizedCustom = $active -replace '\\', '/'
+            Set-ExternalInboxEnv $Path $normalizedCustom
+            Say 'スキャン保存先のパス区切りを / に直しました'
+        }
+        Say "この機械は設定済みのフォルダを使い続けます: $active"
+        Say "標準へ切り替えるには $Path の LASER_EXTERNAL_INBOX_HOST 1 行を書き換えてください"
+    }
+}
+
 Write-Host ''
 Write-Host '========================================================================'
 Write-Host ' LaserEditor セットアップ (Windows)'
@@ -158,10 +281,15 @@ Say "Docker: 稼働中 ($(docker --version))"
 
 # ============================================================ 配置 ==========
 
+$downloadsPath = Get-CanonicalDownloads
+$standardInbox = Join-Path $downloadsPath 'LaserEditor\Scan-Inbox'
+$standardInboxNormalized = $standardInbox -replace '\\', '/'
+$standardInboxRootNormalized = $downloadsPath -replace '\\', '/'
 Say "配置先: $InstallDir"
 New-Item -ItemType Directory -Force -Path $InstallDir              | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir 'data')            | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir 'tailscale-state') | Out-Null
+New-Item -ItemType Directory -Force -Path $standardInbox | Out-Null
 
 $EmbeddedCompose = @'
 name: laser-editor
@@ -187,10 +315,13 @@ services:
     env_file: .env
     environment:
       - TZ=${TZ:-Asia/Tokyo}
-      - LASER_EXTERNAL_INBOX=${LASER_EXTERNAL_INBOX_HOST:+/scan-inbox}
+      - LASER_EXTERNAL_INBOX=${LASER_EXTERNAL_INBOX_MOUNT:+/scan-inbox}
+      - LASER_EXTERNAL_INBOX_ROOT=${LASER_EXTERNAL_INBOX_ROOT:-}
+      - LASER_EXTERNAL_INBOX_HOST=${LASER_EXTERNAL_INBOX_HOST:-}
     volumes:
       - ./data:/app/data
-      - ${LASER_EXTERNAL_INBOX_HOST:-./scan-inbox}:/scan-inbox
+      - ${LASER_EXTERNAL_INBOX_ROOT:-./scan-inbox-root}:/scan-inbox-root
+      - ${LASER_EXTERNAL_INBOX_MOUNT:-./scan-inbox}:/scan-inbox
       - laser-ai-work:/app/data/ai_work
       - tailscale-socket:/var/run/tailscale
     depends_on:
@@ -264,32 +395,15 @@ $digestLine
 # **書き換えると公開 URL が変わり、配布済みの QR は届かなくなります。**
 # 2 台目を導入するときは、この行が機械ごとに違うことを確かめてください。
 LASER_TS_HOSTNAME=$tsHostname
-# ScanSnap Home の保存先フォルダ(この PC の実パス)。設定すると自動取込が動きます。
-# **区切りは / で書いてください**（\ ではありません）。空白を含むパスもそのままで可。
-#LASER_EXTERNAL_INBOX_HOST=C:/Users/you/Documents/ScanSnap Home folder
+# 外部画像取り込みの標準受信箱。この PC のダウンロードフォルダから解決します。
+LASER_EXTERNAL_INBOX_HOST=$standardInboxNormalized
+LASER_EXTERNAL_INBOX_ROOT=$standardInboxRootNormalized
 "@
     Write-Utf8NoBom $envPath $envText
     Say '.env を生成しました（管理トークンは自動生成しました）'
 }
 
-# Windows のパスは \ 区切りだが、compose のボリューム指定では / でなければならない。
-# 導入者が \ で書いてしまった場合はここで直す — 直さないと bind mount が
-# 「存在しないパス」として黙って空フォルダになる。
-$envLines = [System.IO.File]::ReadAllLines($envPath)
-$changed = $false
-for ($i = 0; $i -lt $envLines.Length; $i++) {
-    if ($envLines[$i] -match '^LASER_EXTERNAL_INBOX_HOST=(.+)$') {
-        $raw = $Matches[1]
-        if ($raw -match '\\') {
-            $envLines[$i] = 'LASER_EXTERNAL_INBOX_HOST=' + ($raw -replace '\\', '/')
-            $changed = $true
-        }
-    }
-}
-if ($changed) {
-    Write-Utf8NoBom $envPath (($envLines -join "`n") + "`n")
-    Say 'スキャン保存先のパス区切りを / に直しました'
-}
+Update-ExternalInboxEnv $envPath $standardInbox (Join-Path $InstallDir 'scan-inbox')
 
 # Finder/エクスプローラから読める閲覧用コピー（.env が正）
 $tokenVal = (Select-String -Path $envPath -Pattern '^LASER_ADMIN_TOKEN=(.*)$').Matches[0].Groups[1].Value
@@ -360,8 +474,9 @@ Write-Host "   データ実体:   $InstallDir  （バックアップはこのフ
 Write-Host ''
 Write-Host '   停止:         Docker Desktop を終了（クジラ → Quit Docker Desktop）'
 Write-Host '   起動:         Docker Desktop を起動するだけ（自動で復帰します）'
-Write-Host '   更新・修復:   install.bat をもう一度実行するだけです'
-Write-Host '   アンインストール: uninstall.bat'
+Write-Host '   更新・修復:   「LaserEditor をインストール.bat」をもう一度実行します'
+Write-Host '   アンインストール: 「LaserEditor をアンインストール.bat」'
 Write-Host ''
-Write-Host '   インターネット公開: 管理画面 → 設定タブ → 公開設定'
+Write-Host "   設定画面:     http://localhost:$AppPort/LaserEditor-settings"
+Write-Host '   初期設定:     参加者アクセスURL・QR / 参加受付'
 Write-Host '========================================================================'

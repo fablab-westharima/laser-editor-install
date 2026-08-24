@@ -24,6 +24,14 @@ set -euo pipefail
 IMAGE=ghcr.io/fablab-westharima/laser-editor
 APP_PORT=8000
 
+# Plan 12 D11: a permitted bind completed in at most 553 ms across five
+# measurements, while a denied Downloads bind did not finish within 200 s.
+# Thirty seconds keeps roughly 55x headroom without allowing an infinite wait.
+MACOS_INBOX_PREFLIGHT_TIMEOUT_SECONDS=30
+# Plan 12 D13: cleanup can also hang after the engine wedges, so it gets its own
+# shorter bound. Failure to clean up must never suppress the recovery guidance.
+MACOS_INBOX_CLEANUP_TIMEOUT_SECONDS=5
+
 say()  { printf '\n\033[1;32m[laser-editor]\033[0m %s\n' "$*"; }
 warn() { printf '\n\033[1;33m[laser-editor WARN]\033[0m %s\n' "$*"; }
 fail() { printf '\n\033[1;31m[laser-editor ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
@@ -60,10 +68,13 @@ services:
     env_file: .env
     environment:
       - TZ=${TZ:-Asia/Tokyo}
-      - LASER_EXTERNAL_INBOX=${LASER_EXTERNAL_INBOX_HOST:+/scan-inbox}
+      - LASER_EXTERNAL_INBOX=${LASER_EXTERNAL_INBOX_MOUNT:+/scan-inbox}
+      - LASER_EXTERNAL_INBOX_ROOT=${LASER_EXTERNAL_INBOX_ROOT:-}
+      - LASER_EXTERNAL_INBOX_HOST=${LASER_EXTERNAL_INBOX_HOST:-}
     volumes:
       - ./data:/app/data
-      - ${LASER_EXTERNAL_INBOX_HOST:-./scan-inbox}:/scan-inbox
+      - ${LASER_EXTERNAL_INBOX_ROOT:-./scan-inbox-root}:/scan-inbox-root
+      - ${LASER_EXTERNAL_INBOX_MOUNT:-./scan-inbox}:/scan-inbox
       - laser-ai-work:/app/data/ai_work
       - tailscale-socket:/var/run/tailscale
     depends_on:
@@ -97,7 +108,112 @@ volumes:
 EMBEDDED_COMPOSE
 }
 
-write_env_if_missing() {  # $1 = install dir, $2 = workers default
+standard_inbox_path() {  # $1 = canonical Downloads
+    printf '%s/LaserEditor/Scan-Inbox\n' "${1%/}"
+}
+
+normalize_inbox_path() {
+    _normalized="$(printf '%s' "$1" \
+        | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+        | tr '\\' '/')"
+    while [ -n "$_normalized" ] && [ "${_normalized%/}" != "$_normalized" ]; do
+        _normalized="${_normalized%/}"
+    done
+    printf '%s\n' "$_normalized"
+}
+
+count_intake_images() {
+    _count=0
+    if [ -d "$1" ]; then
+        for _file in "$1"/*; do
+            [ -f "$_file" ] || continue
+            case "$_file" in
+                *.[Jj][Pp][Gg]|*.[Jj][Pp][Ee][Gg]|*.[Pp][Nn][Gg]|*.[Ww][Ee][Bb][Pp])
+                    _count=$((_count + 1))
+                    ;;
+            esac
+        done
+    fi
+    printf '%s\n' "$_count"
+}
+
+set_external_inbox_key() {  # $1 = .env path, $2 = key, $3 = value
+    _env_path="$1"
+    _key="$2"
+    _value="$3"
+    _tmp="${_env_path}.laser-inbox.$$"
+    awk -v key="$_key" -v value="$_value" '
+        BEGIN { replaced = 0 }
+        index($0, key "=") == 1 && !replaced {
+            print key "=" value
+            replaced = 1
+            next
+        }
+        { print }
+        END { if (!replaced) print key "=" value }
+    ' "$_env_path" > "$_tmp"
+    chmod --reference="$_env_path" "$_tmp" 2>/dev/null || chmod 600 "$_tmp"
+    mv "$_tmp" "$_env_path"
+}
+
+set_external_inbox_env() {  # $1 = .env path, $2 = value
+    set_external_inbox_key "$1" LASER_EXTERNAL_INBOX_HOST "$2"
+}
+
+remove_external_inbox_key() {  # $1 = .env path, $2 = key
+    grep -q "^${2}=" "$1" || return 0
+    _remove_tmp="${1}.laser-inbox-remove.$$"
+    awk -v key="$2" 'index($0, key "=") != 1' "$1" > "$_remove_tmp"
+    chmod --reference="$1" "$_remove_tmp" 2>/dev/null || chmod 600 "$_remove_tmp"
+    mv "$_remove_tmp" "$1"
+}
+
+migrate_external_inbox_env() {  # $1 = install dir, $2 = standard, $3 = legacy
+    _install_dir="$1"
+    _standard="$2"
+    _legacy="$3"
+    _env_path="$_install_dir/.env"
+    [ -f "$_env_path" ] || : > "$_env_path"
+
+    _active="$(grep '^LASER_EXTERNAL_INBOX_HOST=' "$_env_path" | head -n 1 || true)"
+    if [ -n "$_active" ]; then
+        _raw="${_active#LASER_EXTERNAL_INBOX_HOST=}"
+    else
+        _raw=""
+    fi
+    _current="$(normalize_inbox_path "$_raw")"
+    _standard_normalized="$(normalize_inbox_path "$_standard")"
+    _legacy_normalized="$(normalize_inbox_path "$_legacy")"
+    _standard_root="${_standard_normalized%/LaserEditor/Scan-Inbox}"
+
+    if [ -z "$_current" ]; then
+        set_external_inbox_env "$_env_path" "$_standard_normalized"
+        set_external_inbox_key "$_env_path" LASER_EXTERNAL_INBOX_ROOT "$_standard_root"
+        remove_external_inbox_key "$_env_path" LASER_EXTERNAL_INBOX_MOUNT
+        say "標準の監視フォルダを設定しました: $_standard_normalized"
+    elif [ "$_current" = "$_standard_normalized" ]; then
+        set_external_inbox_key "$_env_path" LASER_EXTERNAL_INBOX_ROOT "$_standard_root"
+        remove_external_inbox_key "$_env_path" LASER_EXTERNAL_INBOX_MOUNT
+        return 0
+    elif [ "$_current" = "$_legacy_normalized" ]; then
+        set_external_inbox_env "$_env_path" "$_standard_normalized"
+        set_external_inbox_key "$_env_path" LASER_EXTERNAL_INBOX_ROOT "$_standard_root"
+        remove_external_inbox_key "$_env_path" LASER_EXTERNAL_INBOX_MOUNT
+        say "監視フォルダを標準の場所へ更新しました: $_standard_normalized"
+        _remaining="$(count_intake_images "$_legacy")"
+        if [ "$_remaining" -gt 0 ]; then
+            warn "以前の監視フォルダに画像が $_remaining 件残っています: $_legacy"
+            warn "画像は移動・削除していません。必要に応じて内容を確認してください"
+        fi
+    else
+        remove_external_inbox_key "$_env_path" LASER_EXTERNAL_INBOX_ROOT
+        set_external_inbox_key "$_env_path" LASER_EXTERNAL_INBOX_MOUNT "$_current"
+        say "この機械は設定済みのフォルダを使い続けます: $_raw"
+        say "標準へ切り替えるには $_env_path の LASER_EXTERNAL_INBOX_HOST 1 行を書き換えてください"
+    fi
+}
+
+write_env_if_missing() {  # $1 = install dir, $2 = workers default, $3 = inbox(optional)
     if [ -f "$1/.env" ]; then
         say ".env: 既存を維持(トークン・設定は変更しません)"
     else
@@ -128,6 +244,14 @@ write_env_if_missing() {  # $1 = install dir, $2 = workers default
         else
             DIGEST_LINE="#LASER_IMAGE_DIGEST=sha256:..."
         fi
+        if [ -n "${3:-}" ]; then
+            INBOX_LINE="LASER_EXTERNAL_INBOX_HOST=$3"
+            INBOX_LINES="$INBOX_LINE
+LASER_EXTERNAL_INBOX_ROOT=${3%/LaserEditor/Scan-Inbox}"
+        else
+            INBOX_LINE="#LASER_EXTERNAL_INBOX_HOST=/Users/you/Documents/ScanSnap Home folder"
+            INBOX_LINES="$INBOX_LINE"
+        fi
         cat > "$1/.env" <<EOF
 LASER_ADMIN_TOKEN=$TOKEN
 LASER_WORKERS=$2
@@ -143,7 +267,7 @@ $DIGEST_LINE
 LASER_TS_HOSTNAME=$TS_HOSTNAME
 # ScanSnap Home の保存先フォルダ(この機械の実パス)。設定すると自動取込が動きます。
 # 空白を含むパスもそのまま書けます（クォート不要）。未設定なら自動取込は休止。
-#LASER_EXTERNAL_INBOX_HOST=/Users/you/Documents/ScanSnap Home folder
+$INBOX_LINES
 EOF
         chmod 600 "$1/.env"
         say ".env を生成しました(管理トークン自動生成済み)"
@@ -157,12 +281,112 @@ write_token_file() {  # $1 = install dir — Finder で見える閲覧用コピ�
     printf '%s\n' "$TOKEN_VAL" > "$1/管理トークン.txt"
 }
 
-pull_and_up() {  # $1 = install dir
+resolved_inbox_mount_source_from_env() {  # $1 = .env path
+    _resolved_active="$(grep '^LASER_EXTERNAL_INBOX_ROOT=' "$1" | head -n 1 || true)"
+    if [ -z "$_resolved_active" ]; then
+        _resolved_active="$(grep '^LASER_EXTERNAL_INBOX_HOST=' "$1" | head -n 1 || true)"
+    fi
+    if [ -z "$_resolved_active" ]; then
+        printf '\n'
+        return 0
+    fi
+    normalize_inbox_path "${_resolved_active#*=}"
+}
+
+run_bounded() {  # $1 = seconds, remaining arguments = command
+    _bounded_seconds="$1"
+    shift
+    "$@" &
+    _bounded_pid=$!
+    _bounded_elapsed=0
+    while kill -0 "$_bounded_pid" 2>/dev/null; do
+        if [ "$_bounded_elapsed" -ge "$_bounded_seconds" ]; then
+            kill -KILL "$_bounded_pid" 2>/dev/null || true
+            wait "$_bounded_pid" 2>/dev/null || true
+            return 124
+        fi
+        sleep 1
+        _bounded_elapsed=$((_bounded_elapsed + 1))
+    done
+    wait "$_bounded_pid"
+}
+
+preflight_macos_inbox() {  # $1 = resolved host mount source
+    _preflight_path="$1"
+    _preflight_name="laser-editor-inbox-preflight-$$"
+    _preflight_output="$(mktemp "${TMPDIR:-/tmp}/laser-editor-inbox-preflight.XXXXXX")"
+    INBOX_PREFLIGHT_RESULT=OTHER_ERROR
+    INBOX_PREFLIGHT_ERROR=""
+
+    if run_bounded "$MACOS_INBOX_PREFLIGHT_TIMEOUT_SECONDS" \
+        docker run --name "$_preflight_name" --rm --entrypoint sh \
+        -v "$_preflight_path:/laser-inbox-preflight" "$IMAGE" \
+        -c 'test -d /laser-inbox-preflight && test -r /laser-inbox-preflight' \
+        >"$_preflight_output" 2>&1; then
+        INBOX_PREFLIGHT_RESULT=PASS
+        rm -f "$_preflight_output"
+        return 0
+    else
+        _preflight_rc=$?
+    fi
+    INBOX_PREFLIGHT_ERROR="$(cat "$_preflight_output")"
+    rm -f "$_preflight_output"
+
+    if [ "$_preflight_rc" -eq 124 ]; then
+        INBOX_PREFLIGHT_RESULT=PREREQ_SUSPECTED_TCC
+        # The daemon may already be wedged. Bound this best-effort recovery and
+        # continue to the prerequisite message even when removal cannot finish.
+        run_bounded "$MACOS_INBOX_CLEANUP_TIMEOUT_SECONDS" \
+            docker rm -f "$_preflight_name" >/dev/null 2>&1 || true
+    fi
+    if [ "$_preflight_rc" -eq 124 ]; then
+        :
+    elif ! docker info >/dev/null 2>&1; then
+        INBOX_PREFLIGHT_RESULT=DAEMON_UNAVAILABLE
+    else
+        INBOX_PREFLIGHT_RESULT=OTHER_ERROR
+    fi
+}
+
+macos_inbox_prereq() {
+    need_prereq "Docker が監視フォルダを確認できず、${MACOS_INBOX_PREFLIGHT_TIMEOUT_SECONDS} 秒以内に応答しませんでした。
+   ダウンロードへの Docker のアクセス許可不足が有力です。
+
+   システム設定 → プライバシーとセキュリティ → ファイルとフォルダ →
+   Docker →「ダウンロード」フォルダ を許可してください。
+
+   許可後に Docker Desktop を再起動してから、このインストーラを
+   もう一度実行してください。"
+}
+
+pull_and_up() {  # $1 = install dir, $2 = macOS probe path (empty skips probe)
     cd "$1"
     say "イメージを取得します: $IMAGE (公開イメージ・ログイン不要)"
     if ! docker compose pull; then
         warn "イメージの取得に失敗しました。ネットワーク接続を確認して、同じコマンドをもう一度実行してください"
         exit 1
+    fi
+    if [ -n "${2:-}" ]; then
+        say "監視フォルダを確認します (最大 ${MACOS_INBOX_PREFLIGHT_TIMEOUT_SECONDS} 秒)"
+        preflight_macos_inbox "$2"
+        case "$INBOX_PREFLIGHT_RESULT" in
+            PASS)
+                :
+                ;;
+            PREREQ_SUSPECTED_TCC)
+                macos_inbox_prereq
+                ;;
+            DAEMON_UNAVAILABLE)
+                need_prereq "監視フォルダの確認中に Docker Desktop のエンジンへ接続できなくなりました。
+
+   Docker Desktop を再起動し、クジラのアイコンが「Engine running」で
+   安定するまで待ってから、このインストーラをもう一度実行してください。"
+                ;;
+            OTHER_ERROR)
+                fail "監視フォルダを確認できませんでした。Docker からのエラー:
+$INBOX_PREFLIGHT_ERROR"
+                ;;
+        esac
     fi
     say "起動します"
     docker compose up -d
@@ -279,15 +503,23 @@ macos_install() {
     say "Docker: 稼働中 ($(docker --version))"
 
     # ------------------------------------------------------ files & start
+    DOWNLOADS="$(osascript -l JavaScript -e 'ObjC.import("Foundation"); $.NSFileManager.defaultManager.URLsForDirectoryInDomains($.NSDownloadsDirectory, $.NSUserDomainMask).objectAtIndex(0).path.js' 2>/dev/null || true)"
+    if [ -z "$DOWNLOADS" ] || [ ! -d "$DOWNLOADS" ]; then
+        DOWNLOADS="$HOME/Downloads"
+        warn "標準のダウンロードフォルダを取得できなかったため、$DOWNLOADS を使います"
+    fi
+    STANDARD_INBOX="$(standard_inbox_path "$DOWNLOADS")"
     say "配置先: $INSTALL_DIR"
-    mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/tailscale-state"
+    mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/tailscale-state" "$STANDARD_INBOX"
     write_compose "$INSTALL_DIR"
-    write_env_if_missing "$INSTALL_DIR" 4
+    write_env_if_missing "$INSTALL_DIR" 4 "$STANDARD_INBOX"
+    migrate_external_inbox_env "$INSTALL_DIR" "$STANDARD_INBOX" "$INSTALL_DIR/scan-inbox"
+    RESOLVED_INBOX_MOUNT_SOURCE="$(resolved_inbox_mount_source_from_env "$INSTALL_DIR/.env")"
     write_token_file "$INSTALL_DIR"
     # 電源操作ヘルパーは導入しない(PC の停止 = Docker Desktop の終了。
     # 管理画面もその案内を表示する — docker.sock 共有は権限過大のため非採用)
 
-    pull_and_up "$INSTALL_DIR"
+    pull_and_up "$INSTALL_DIR" "$RESOLVED_INBOX_MOUNT_SOURCE"
     health_wait
 
     if [ "$HEALTH_OK" -eq 1 ]; then
@@ -303,9 +535,10 @@ macos_install() {
 
    停止:         Docker Desktop を終了(メニューバーのクジラ → Quit)
    起動:         Docker Desktop を起動するだけ(自動で復帰します)
-   更新・修復:   同じ 1 行をもう一度実行するだけです
+   更新・修復:   「LaserEditor をインストール.command」をもう一度実行します
 
-   インターネット公開: 管理画面 → 設定タブ → 公開設定
+   設定画面:     http://localhost:$APP_PORT/LaserEditor-settings
+   初期設定:     参加者アクセスURL・QR / 参加受付
 ========================================================================
 EOF
     else
@@ -433,7 +666,7 @@ EOF
     chown -R 1000:1000 "$INSTALL_DIR/data" "$INSTALL_DIR/tailscale-state"
 
     # ------------------------------------------------------------- pull & up
-    pull_and_up "$INSTALL_DIR"
+    pull_and_up "$INSTALL_DIR" ""
     health_wait
 
     IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
@@ -449,7 +682,7 @@ EOF
    データ実体:   $INSTALL_DIR/data  (バックアップはこのフォルダと .env のコピー)
    更新・修復:   同じ install.sh をもう一度実行するだけです
 
-   インターネット公開(Tailscale Funnel): 管理画面 → 設定タブ → 公開設定
+   参加者アクセスURL(インターネット経由・Tailscale Funnel): 管理画面 → 参加者アクセスURL・QR
 ========================================================================
 EOF
     else

@@ -232,5 +232,9 @@ if [ "$PURGE" -eq 1 ]; then
     say "アンインストールが完了しました(データも削除しました)。"
 else
     say "アンインストールが完了しました。データは $INSTALL_DIR に残っています。"
-    say "もう一度使うときは、同じインストーラを実行すればこのデータのまま復帰します。"
+    if [ "$PLATFORM" = "Darwin" ]; then
+        say "もう一度使うときは、「LaserEditor をインストール.command」を実行すればこのデータのまま復帰します。"
+    else
+        say "もう一度使うときは、install.sh を実行すればこのデータのまま復帰します。"
+    fi
 fi
