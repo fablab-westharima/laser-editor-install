@@ -1,135 +1,66 @@
-# LaserEditor を Mac で動かす
+# Mac に LaserEditor をインストールする
 
-ワークショップに持っていく Mac 1 台で、参加者向けのデザインサイトを立ち上げて公開するまでの手順です。
-Apple Silicon（M1 / M2 / M3 …）と Intel のどちらでも同じ手順です。
+この手順では、ターミナルへコマンドを入力しません。
 
-## 必要なもの
+## 1. Docker Desktop を準備する
 
-- Mac 1 台
-- [Tailscale](https://tailscale.com/) のアカウント（無料。Google アカウント等でログインできます — 公開 URL の発行に使います）
-- 動作確認用のスマホ
+LaserEditor は Docker Desktop 自体を入れません。最初の1回だけ、
+[Docker Desktop 公式サイト](https://www.docker.com/products/docker-desktop/)から
+Mac版をインストールしてください。
 
----
+1. Docker Desktop をインストールして起動する
+2. 画面の初回設定を最後まで進める
+3. **Engine running** と表示されるまで待つ
 
-## 1. Docker Desktop を用意する（最初の 1 回だけ）
+Docker Desktop のアカウント登録やサインインは不要です。
+Docker Desktopの設定で、ログイン時に起動する項目をONにしておくと、Mac再起動後も
+LaserEditorが自動で復帰します。
 
-**ここは LaserEditor ではなく Docker の作業です。** LaserEditor のインストーラは Docker Desktop を
-入れないので、先に済ませてください。
+## 2. Mac版ZIPを開く
 
-1. https://www.docker.com/products/docker-desktop/ からダウンロードしてインストール
-2. **Docker Desktop を起動する**
-3. **初回セットアップを最後まで進める**（「Use recommended settings」→「Finish」。
-   管理者パスワードを求められたら入力してください）
-4. メニューバーのクジラのアイコンが動きを止め、**「Engine running」**になるまで待つ
-5. **設定 → General → 「Start Docker Desktop when you sign in」を ON** にする
-   （Mac を起動すればサーバーも自動で立ち上がるようになります）
+1. [Mac版をダウンロード](https://github.com/fablab-westharima/laser-editor-install/releases/latest/download/LaserEditor-Installer-macOS.zip)
+2. ダウンロードした `LaserEditor-Installer-macOS.zip` をダブルクリックして展開する
+3. 展開したフォルダを開く
 
-> Docker Desktop のアカウント登録・サインインは**不要**です。求められたら Skip で進めて構いません。
+ZIPの中のファイルを個別にダウンロードしないでください。ZIPには、インストーラーが必要とする
+ファイルと実行権限がまとめて入っています。
 
-**この 5 つが終わる前に LaserEditor のインストーラを実行しても、何も変更せずに止まります。**
-その場合は画面の案内どおり Docker Desktop を整えてから、もう一度実行してください。
+## 3. インストーラーを実行する
 
----
+**`LaserEditor をインストール.command`** をダブルクリックします。
 
-## 2. LaserEditor を入れる（ターミナルで 1 行）
+初回にMacの保護機能で開けない場合は、ファイルをControlキーを押しながらクリックし、
+**開く**を選び、確認画面でも**開く**を選びます。コマンド入力は不要です。
 
-「ターミナル」アプリを開いて、次の 1 行を貼り付けて Enter:
+- Docker Desktopが無い場合は、ダウンロードページと準備手順が表示されます
+- Docker Desktopの準備が途中なら、**Engine running** にしてから同じランチャーを再実行します
+- 準備済みなら、LaserEditorを導入してブラウザを開きます
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/fablab-westharima/laser-editor-install/main/install.sh | bash
-```
+## 4. 最初の設定
 
-- 数分待つと「LaserEditor が起動しました」と表示され、ブラウザが自動で開きます
-- 途中で失敗しても、**同じ 1 行をもう一度**実行すれば続きから修復されます
-- 以後、**アップデートもこの同じ 1 行**です（ターミナルを使うのはこの時だけ）
+ブラウザで `http://localhost:8000/LaserEditor-settings` を開きます。
 
-### 何が どこに 入るか
+1. **参加者アクセスURL・QR**で、参加者へ渡すURLとQRを準備する
+2. **参加者への解放**で、**参加受付**を確認する
 
-| 場所 | 中身 |
-|---|---|
-| `ホーム → laser-editor` | LaserEditor のすべて（設定・データ・管理トークン） |
-| `laser-editor/data` | 参加者のデザイン、スキャン、設定 |
-| `laser-editor/管理トークン.txt` | 管理画面にログインするための鍵 |
+参加者アクセスURLを有効にするときは、画面に表示される案内に従ってTailscaleへログインします。
 
-Docker Desktop 自体はこのフォルダの外にあり、LaserEditor は触りません。
+古いログイン用ファイルを選ぶ操作はありません。
 
----
+## ScanSnap Homeを使う
 
-## 3. インターネット公開（ブラウザだけ・約 3 分）
+標準の監視先は `Downloads/LaserEditor/Scan-Inbox` です。
 
-参加者がスマホでアクセスできる固定 URL と QR コードを作ります。
+1. 設定画面の**ラボ構成・AI**を開く
+2. **外部画像取り込み**で**監視フォルダを作成**を押す
+3. ScanSnap Homeの保存先に、このフォルダを指定する
 
-1. `http://localhost:8000/admin-fablab-westharima` を開く → **[トークンファイルを選択]** を押して、
-   **`ホーム → laser-editor → 管理トークン.txt`** を選ぶだけでログインできます
-   （コピペ不要。ファイル選択画面で **⌘⇧H** を押すとホームフォルダに一発で移動できます。
-   スマホから管理する場合は「直接入力」でトークンを貼り付け）
-2. **設定タブ → 「公開設定（インターネット公開）」→ [公開を開始]**
-3. **🔗「Tailscale にログインする」リンク**が出るのでクリック → Tailscale にログイン（Google 等で OK）→ 承認
-   ※初回のみ、Funnel（公開機能）の有効化ボタンが出ることがあります — 押すだけです
-4. 画面に戻ると自動で進み、**公開 URL と QR コード**が表示されます
-   （証明書の発行で 1〜2 分待つことがあります。リロードしても安全です）
-5. スマホ（Wi-Fi を切って 4G/5G）で QR を読んで、サイトが開けば完成。
-   **この画面を印刷すれば WS の配布物になります**
+取り込みに成功した画像は受信フォルダから片付きます。同じ画像を後でもう一度投入できます。
 
----
+## 更新とアンインストール
 
-## 4. スキャナ（ScanSnap）から自動で取り込む
+- 更新・修復: **`LaserEditor をインストール.command`**をもう一度ダブルクリック
+- 通常アンインストール: **`LaserEditor をアンインストール.command`**をダブルクリック
 
-ScanSnap Home と LaserEditor が**同じ Mac**にある場合、スキャンした紙を自動で共有棚へ載せられます。
-
-1. **ScanSnap Home** の保存先フォルダを決める（既定のままで構いません）
-2. `ホーム → laser-editor → .env` をテキストエディタで開き、次の 1 行を追加する
-
-   ```
-   LASER_EXTERNAL_INBOX_HOST=/Users/あなた/Documents/ScanSnap Home folder
-   ```
-
-   - **そのフォルダの実際のパス**を書きます。空白を含んでいてもそのままで構いません（引用符は不要）
-   - `.env` は隠しファイルです。Finder で `laser-editor` フォルダを開き **⌘⇧.** を押すと表示されます
-3. 2 の 1 行（インストーラ）をもう一度実行する
-
-これで、スキャンして数十秒待つと参加者の共有棚に現れます。
-
-> **有効にした時点でフォルダに入っている画像も取り込まれます。** 過去のスキャンが残っているフォルダを
-> 指定すると、それらも一度に上がってきます。気になる場合は先に整理してから設定してください。
-
-**LaserEditor はフォルダの中身を消しません。** 取り込んだ原本はそのまま残り、枚数が増えると
-`_archive` サブフォルダへ移動します（削除ではなく移動です）。
-
----
-
-## 5. 日々の使い方
-
-| したいこと | 操作 |
-|---|---|
-| サーバーを起動 | **Mac を起動するだけ**（Docker Desktop が自動で立ち上がり、サイトも公開状態ごと復帰します） |
-| サーバーを停止 | **メニューバーのクジラアイコン → Quit Docker Desktop**（丸ごと安全に止まります） |
-| 公開だけ止める（WS 終了時など） | 管理画面 → サーバー操作 → **[公開を停止]**（サーバー本体は動いたまま） |
-| アップデート | 2 の同じ 1 行をもう一度 → [運用ガイド](operations.md#更新する) |
-| バックアップ | `ホーム → laser-editor` を丸ごとコピー → [運用ガイド](operations.md#バックアップ) |
-| アンインストール | ターミナルで `uninstall.sh` を実行 → [運用ガイド](operations.md#アンインストール) |
-
----
-
-## 6. 困ったとき
-
-まず [困ったとき](troubleshooting.md) を見てください。Mac 特有のものだけここに書きます。
-
-- **画面が真っ白／ボタンが出ない／トークンを間違えた**: 画面右上の **[トークン再設定]** を押すと、
-  ファイル選択からやり直せます。サーバーを入れ直した時も、古いトークンを検知して自動で選び直し画面になります
-- **公開 URL の名前に「-1」が付いた**: 以前のサーバーの登録が Tailscale に残っています。
-  [管理コンソールの機材一覧](https://login.tailscale.com/admin/machines) で古い `laser-editor` を
-  Remove すると、次回から元の名前に戻せます
-- **半年後につながらなくなった**: Tailscale の鍵の有効期限（約 180 日）です。管理画面で [公開を開始] →
-  ログインリンクをもう一度踏めば復活します。常設するラボは
-  [機材一覧](https://login.tailscale.com/admin/machines) で該当ノードの **Disable key expiry** を
-  設定しておくと切れなくなります
-- **わからなくなったら**: ターミナルで 2 の同じ 1 行（修復を兼ねます）
-
----
-
-## 7. 別の Mac へ引っ越す
-
-`ホーム → laser-editor` フォルダを**丸ごとコピー**して、新しい Mac の同じ場所に置き、
-2 の 1 行を実行するだけです。デザインデータ・設定・管理トークン・公開 URL の身元がすべて入っているので、
-**同じ公開 URL のまま**引っ越せます。
+通常アンインストールでは参加者のデータを残します。詳しくは
+[運用ガイド](operations.md)を確認してください。
