@@ -26,6 +26,9 @@ Mac または Windows 用をインストールします。Docker Desktop を起�
 | Mac | **`LaserEditor をインストール.command`** |
 | Windows | **`LaserEditor をインストール.bat`** |
 
+Macでは初回のみ、macOSがインストーラーをブロックする場合があります。その場合は
+[Macの導入手順](docs/setup-macos.md)にある「プライバシーとセキュリティ」から開いてください。
+
 インストールが終わると、LaserEditor がブラウザで開きます。設定は
 `http://localhost:8000/LaserEditor-settings` を開き、
 **参加者アクセスURL・QR**と**参加受付**を確認してください。
