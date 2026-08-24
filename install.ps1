@@ -469,7 +469,6 @@ Write-Host '====================================================================
 Write-Host ' LaserEditor が起動しました（ブラウザを開きました）'
 Write-Host ''
 Write-Host "   アプリ:       http://localhost:$AppPort"
-Write-Host "   管理トークン: $InstallDir の「管理トークン.txt」"
 Write-Host "   データ実体:   $InstallDir  （バックアップはこのフォルダごとコピー）"
 Write-Host ''
 Write-Host '   停止:         Docker Desktop を終了（クジラ → Quit Docker Desktop）'

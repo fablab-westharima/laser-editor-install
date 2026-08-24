@@ -530,7 +530,6 @@ macos_install() {
  ✅ LaserEditor が起動しました(ブラウザを開きました)
 
    アプリ:       http://localhost:$APP_PORT
-   管理トークン: $INSTALL_DIR の「管理トークン.txt」
    データ実体:   $INSTALL_DIR  (バックアップはこのフォルダごとコピー)
 
    停止:         Docker Desktop を終了(メニューバーのクジラ → Quit)
@@ -678,7 +677,6 @@ EOF
 
    ブラウザで開いてください:  http://${IP:-<このマシンのIP>}:$APP_PORT
 
-   管理トークン: $INSTALL_DIR/.env の LASER_ADMIN_TOKEN
    データ実体:   $INSTALL_DIR/data  (バックアップはこのフォルダと .env のコピー)
    更新・修復:   同じ install.sh をもう一度実行するだけです
 
